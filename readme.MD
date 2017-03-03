@@ -5,3 +5,5 @@ Parts used:
 - Raspberry Pi
 - optional some PIR
 
+Plugins!
+

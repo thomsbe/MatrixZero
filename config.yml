@@ -1,0 +1,8 @@
+max7219:
+  cascaded: 4
+  block_orientation: vertical
+
+mqtt:
+  server: 192.168.88.13
+  port: 1883
+  topic: /matrixzero/#

@@ -1,11 +1,34 @@
-import argparse
+import copy
+import imp
+import os
 import threading
 
-import paho.mqtt.client as mqtt
+import yaml
 from luma.core.legacy import show_message
 from luma.core.legacy.font import proportional, CP437_FONT
 from luma.core.serial import spi, noop
 from luma.led_matrix.device import max7219
+
+PluginFolder = "./plugins"
+MainModule = "plugin"
+
+displaydict = ()
+
+
+def getPlugins():
+    plugins = []
+    possibleplugins = os.listdir(PluginFolder)
+    for i in possibleplugins:
+        location = os.path.join(PluginFolder, i)
+        if not os.path.isdir(location) or not MainModule + ".py" in os.listdir(location):
+            continue
+        info = imp.find_module(MainModule, [location])
+        plugins.append({"name": i, "info": info})
+    return plugins
+
+
+def loadPlugin(plugin):
+    return imp.load_module(MainModule, *plugin["info"])
 
 
 def showmsg(device, content):
@@ -13,61 +36,38 @@ def showmsg(device, content):
 
 
 def display(cascaded, block_orientation):
+    global displaydict
     serial = spi(port=0, device=0, gpio=noop())
     device = max7219(serial, cascaded=cascaded or 1, block_orientation=block_orientation)
 
     showmsg(device, "MatrixZero Start")
 
-    d = displayer(device)
-    d.start()
-
-
-class displayer(threading.Thread):
-    def __init__(self, device):
-        threading.Thread.__init__(self)
-        self.device = device
-
-    def run(self):
-        pass
-
-    def start(self):
-        pass
-
-
-def on_connect(client, userdata, flags, rc):
-    print("Connected with result code " + str(rc))
-
-
-def on_message(client, userdata, msg):
-    print(msg.topic + " " + str(msg.payload))
-
-
-def subscriber(mqtt_server, mqtt_port, topic):
-    client = mqtt.Client()
-    client.on_message = on_message
-    client.on_connect = on_connect
-
-    client.connect(mqtt_server, mqtt_port, 60)
-    client.subscribe(topic)
-
-    client.loop_forever()
+    for item in displaydict:
+        print item
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='MatrixZero Arguments',
-                                     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    plugins = []
+    for i in getPlugins():
+        print("Loading plugin " + i["name"])
+        p = loadPlugin(i)
+        plugins.append(p)
 
-    parser.add_argument('--cascaded', '-n', type=int, default=4, help='Number of cascaded MAX7219 LED matrices')
-    parser.add_argument('--block-orientation', '-o', type=str, default='vertical', choices=['horizontal', 'vertical'],
-                        help='Corrects block orientation when wired vertically')
-    parser.add_argument('--mqtt-server', '-s', type=str, default='localhost', help='MQTT Server')
-    parser.add_argument('--mqtt-port', '-p', type=int, default=1883, help='MQTT Port')
-    parser.add_argument('--topic', '-t', type=str, default='matrixzero', help='Subscribe this topic for messages')
+    with open("config.yml", 'r') as ymlfile:
+        cfg = yaml.load(ymlfile)
 
-    args = parser.parse_args()
+    cascaded = cfg['max7219']['cascaded'] or 4
+    block_orientation = cfg['max7219']['block_orientation'] or 'vertical'
+
+    threads = []
 
     try:
-        display(args.cascaded, args.block_orientation)
-        subscriber(args.mqtt_server, args.mqtt_port, args.topic)
+        displayer = threading.Thread(target=display, args=(cascaded, block_orientation))
+        threads.append(displayer)
+        displayer.start()
+        for p in plugins:
+            p = threading.Thread(name=p.get_name(), target=p.run, args=(cfg, displaydict))
+            threads.append(p)
+            p.start()
     except KeyboardInterrupt:
         pass
